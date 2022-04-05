@@ -1,0 +1,2 @@
+recursive-include nautobot_porthistory_plugin/templates *
+recursive-include nautobot_porthistory_plugin/static *

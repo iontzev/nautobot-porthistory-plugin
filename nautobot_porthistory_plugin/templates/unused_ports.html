@@ -1,0 +1,17 @@
+<div class="panel panel-default">
+	<div class="panel-heading"><strong>Неиспользуемые порты (в течение последних {{ min_idle_days }} дн.)</strong></div>
+	<table class="table table-hover panel-body attr-table">
+		<tr>
+			<td>Порт</td>
+			<td>Время последней активности</td>
+			<td>Обновлено (UTC)</td>
+		</tr>
+		{% for item in unused_ports %}
+		<tr>
+			<td>{{ item.interface_name }}</td>
+			<td>{{ item.last_output }} (прошло ~{{ item.delta }} дн.)</td>
+			<td>{{ item.updated }}</td>
+		</tr>
+		{% endfor %}
+	</table>
+</div>
