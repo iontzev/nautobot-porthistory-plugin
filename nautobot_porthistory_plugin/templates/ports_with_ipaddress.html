@@ -1,0 +1,21 @@
+<div class="panel panel-default">
+	<div class="panel-heading"><strong>Был найден на интерфейсах</strong></div>
+	<table class="table table-hover panel-body attr-table">
+		<tr>
+			<td>VLAN</td>
+			<td>MAC</td>
+			<td>Устройство</td>
+			<td>Интерфейс</td>
+			<td>Обновлено (UTC)</td>
+		</tr>
+		{% for item in ports_with_ipaddress %}
+		<tr>
+			<td><a href="{{ item.vlan.get_absolute_url }}">{{ item.vlan }}</a></td>
+			<td>{{ item.mac }}</td>
+			<td><a href="{{ item.interface.device.get_absolute_url }}">{{ item.interface.device }}</a></td>
+			<td><a href="{{ item.interface.get_absolute_url }}">{{ item.interface }}</a></td>
+			<td>{{ item.updated }}</td>
+		</tr>
+		{% endfor %}
+	</table>
+</div>

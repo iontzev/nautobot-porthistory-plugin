@@ -1,0 +1,23 @@
+<div class="panel panel-default">
+	<div class="panel-heading"><strong>MAC на порту</strong></div>
+	<table class="table table-hover panel-body attr-table">
+		<tr>
+			<td>VLAN</td>
+			<td>MAC</td>
+			<td>IP адрес</td>
+			<td>Обновлено (UTC)</td>
+		</tr>
+		{% for item in mac_on_ports %}
+		<tr>
+			<td><a href="{{ item.vlan.get_absolute_url }}">{{ item.vlan }}</a></td>
+			<td>{{ item.mac }}</td>
+			{% if item.ipaddress %}
+			<td><a href="{{ item.ipaddress.get_absolute_url }}">{{ item.ipaddress }}</a></td>
+			{% else %}
+			<td></td>
+			{% endif %}
+			<td>{{ item.updated }}</td>
+		</tr>
+		{% endfor %}
+	</table>
+</div>

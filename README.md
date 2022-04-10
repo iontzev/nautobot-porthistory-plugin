@@ -30,13 +30,14 @@ Update a PLUGINS_CONFIG parameter in **nautobot_config.py** to rewrite default p
 PLUGINS_CONFIG = {
     'nautobot_porthistory_plugin': {
         'switches_role_slug': ['Access-switch'],
+        'routers_role_slug': ['Router'],
         'min_idle_days': 14,
         'snmp_community': 'public',
         'workers': 50,
      }
 }
 ```
-Parameter `switches_role_slug` is required. 
+Parameters `switches_role_slug` and `routers_role_slug` is required. 
 
 ### Restart Nautobot
 Restart the WSGI service to apply changes:

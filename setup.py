@@ -2,9 +2,9 @@ from setuptools import find_packages, setup
 
 setup(
     name='nautobot_porthistory_plugin',
-    version='1.0.0',
+    version='1.1.0',
     url='https://github.com/iontzev/nautobot-porthistory-plugin',
-    description='Last outputs history for ports of switches',
+    description='Last outputs and MAC on ports history for ports of switches',
     author='Max Iontzev',
     author_email='iontzev@gmail.com',
     install_requires=[],
