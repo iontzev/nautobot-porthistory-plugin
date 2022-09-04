@@ -11,16 +11,21 @@ from nautobot_porthistory_plugin.models import UnusedPorts, MAConPorts
 import asyncio
 import aiosnmp
 from ipaddress import IPv4Network, IPv4Address
-import socket
+import aiodns
 
 from collections import defaultdict
 from netutils.interface import canonical_interface_name
 from datetime import datetime, timedelta
 
+name = "System"
+loop = asyncio.get_event_loop()
+
 class UnusedPortsUpdate(Job):
 
     class Meta:
         name = "Обновление информации о неподключенных интерфейсах"
+        hidden = True
+
 
     site = ObjectVar(
         model=Site,
@@ -187,12 +192,16 @@ class MAConPortsUpdate(Job):
 
     class Meta:
         name = "Обновление информации о подключенных устройствах"
+        hidden = True
+        soft_time_limit = 1200
+        time_limit = 1800
 
     site = ObjectVar(
         model=Site,
         label='БЮ',
         required=False
     )
+
 
     async def bulk_snmp(self, device, oid_list, community):
         oid_results = {}
@@ -264,6 +273,7 @@ class MAConPortsUpdate(Job):
             if cable.termination_b_type == ContentType.objects.get(app_label='dcim', model='interface'):
                 if not data['site'] or cable.termination_b.device.site == data['site']:
                     cable_set[cable.termination_b.device.name].add(cable.termination_b.name)
+        self.log_info(message=f'Получен граф связей коммутаторов')
 
         # сгенерируем справочник вланов с разбивкой по сайтам
         vlans_by_site = defaultdict(list)
@@ -305,6 +315,7 @@ class MAConPortsUpdate(Job):
         # получим названия интерфейсов и их индексы с оборудования по SNMP
         oid_list = ['.1.3.6.1.2.1.31.1.1.1.1']
         results = asyncio.run(self.async_bulk_snmp(devices_list, oid_list, COMMUNITY, WORKERS))
+        self.log_info(message=f'Получены индексы интерфейсов с коммутатоорв')
         for device_ip, device_result in results:
             if type(device_result) != dict:
                 self.log_warning(obj=devices[device_ip]['device'],message=f'не удалось получить информацию по SNMP')
@@ -324,13 +335,13 @@ class MAConPortsUpdate(Job):
         port_mac_relation = defaultdict(list)
 
         for vlan, devices_dict in vlans.items():
-            self.log_info(message=f'Получаем информацию по VLAN {vlan}')
             community_with_vlan = f'{COMMUNITY}@{vlan}'
             devices_list = [device for device in devices_dict if device in devices_list]
 
             # получим bridge ports с оборудования по SNMP (зависит от VLAN)
             oid_list = ['.1.3.6.1.2.1.17.1.4.1.2']
             results = asyncio.run(self.async_bulk_snmp(devices_list, oid_list, community_with_vlan, WORKERS))
+            self.log_info(message=f'Получена информация по bridge ports со всех коммутаторов для VLAN {vlan}')
             for device_ip, device_result in results:
                 if type(device_result) != dict:
                     # скорее всего, такого VLAN нет на этом устройстве
@@ -347,6 +358,7 @@ class MAConPortsUpdate(Job):
                 oid_list = ['.1.3.6.1.2.1.17.4.3.1.2']
 
                 results = asyncio.run(self.async_bulk_snmp(devices_list, oid_list, community_with_vlan, WORKERS))
+                self.log_info(message=f'Получена таблица MAC со всех коммутаторов для VLAN {vlan}')
                 for device_ip, device_result in results:
                     nb_device = devices[device_ip]['device']
                     nb_vlan = VLAN.objects.get(vid=vlan, site_id=nb_device.site.id)
@@ -391,6 +403,7 @@ class MAConPortsUpdate(Job):
         # получим ARP-таблицу с оборудования по SNMP
         oid_list = ['.1.3.6.1.2.1.3.1.1.2']
         results = asyncio.run(self.async_bulk_snmp(routers_list, oid_list, COMMUNITY, WORKERS))
+        self.log_info(message=f'Получена ARP таблица со всех маршрутизаторов')
         for device_ip, device_result in results:
             site = routers[device_ip]['site']
             arp[site] = defaultdict(list)
@@ -405,6 +418,7 @@ class MAConPortsUpdate(Job):
 
         output = ''
 
+        ip_for_nslookup = []
         for device in devices.values():
             nb_device = device['device']
             site = nb_device.site.name
@@ -430,26 +444,18 @@ class MAConPortsUpdate(Job):
                             break
                     if address_with_prefix:
                         ip_on_device += 1
-                        try:
-                            hostname, aliaslist, ipaddrlist  = socket.gethostbyaddr(address)
-                            name_on_device += 1
-                        except:
-                            hostname=''
                         nb_address, created = IPAddress.objects.get_or_create(
                             address=address_with_prefix,
                             vrf=nb_prefix.vrf,
                             defaults={
-                                'status': STATUS_STATIC,
-                                'dns_name': hostname
+                                'status': STATUS_STATIC
                             }
                         )
                         if created:
-                            self.log_success(obj=nb_address, message=f'Добавлен IP адрес {hostname}')
-                        elif nb_address.status != STATUS_DHCP and hostname and nb_address.dns_name != hostname:
-                            old_hostname = nb_address.dns_name
-                            nb_address.dns_name = hostname
-                            nb_address.save()
-                            self.log_success(obj=nb_address, message=f'Обновлено DNS name "{old_hostname}" -> "{hostname}"')
+                            self.log_success(obj=nb_address, message=f'Добавлен IP адрес')
+                            ip_for_nslookup.append(address_with_prefix)
+                        elif nb_address.status != STATUS_DHCP:
+                            ip_for_nslookup.append(address_with_prefix)
                     else:
                         nb_address = None
                     mac, created = MAConPorts.objects.get_or_create(
@@ -475,8 +481,53 @@ class MAConPortsUpdate(Job):
                         if updated:
                             mac.save()
 
-            output += f" MAC count - {mac_on_device}, IP count - {ip_on_device}, resolved to hostname - {name_on_device}\n"
+            output += f" MAC count - {mac_on_device}, IP count - {ip_on_device}\n"
 
+        self.log_info(message=f'Определим имена хостов по IP адресам')
+        resolver = aiodns.DNSResolver(loop=loop)
+
+        async def nslookup(ip):
+            results = {}
+            try:
+                reply = await resolver.gethostbyaddr(ip.split('/')[0])
+                return (ip, reply)
+            except Exception as error:
+                return (ip, error)
+            return (ip, None)
+
+        async def nslookup_with_semaphore(semaphore, function, *args, **kwargs):
+            async with semaphore:
+                return await function(*args, **kwargs)
+
+        async def async_nslookup(addresses, workers):
+            semaphore = asyncio.Semaphore(workers)
+            coroutines = [
+                nslookup_with_semaphore(semaphore, nslookup, address)
+                for address in addresses
+            ]
+            result = []
+            for future in asyncio.as_completed(coroutines):
+                result.append(await future)
+            return result
+
+        names = loop.run_until_complete(async_nslookup(ip_for_nslookup, WORKERS))
+        resolved = 0
+        for name in names:
+            output += f" result of aiodns - {name}\n"
+            try:
+                hostname = name[1].name
+                nb_address = IPAddress.objects.get(address=name[0])
+                if hostname and nb_address.dns_name != hostname:
+                    old_hostname = nb_address.dns_name
+                    nb_address.dns_name = hostname
+                    nb_address.save()
+                    self.log_success(obj=nb_address, message=f'Обновлено DNS name "{old_hostname}" -> "{hostname}"')
+                resolved +=1
+            except:
+                pass
+        self.log_info(message=f'Определено адресов: {resolved} из {len(ip_for_nslookup)}')
+
+        
         return output
 
 jobs = [UnusedPortsUpdate, MAConPortsUpdate]
